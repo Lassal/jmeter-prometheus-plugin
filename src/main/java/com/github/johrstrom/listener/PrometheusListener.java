@@ -21,6 +21,11 @@ package com.github.johrstrom.listener;
 import java.io.Serializable;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.jmeter.assertions.AssertionResult;
 import org.apache.jmeter.engine.util.NoThreadClone;
@@ -30,6 +35,7 @@ import org.apache.jmeter.samplers.SampleListener;
 import org.apache.jmeter.testelement.TestStateListener;
 import org.apache.jmeter.testelement.property.ObjectProperty;
 import org.apache.jmeter.threads.JMeterContextService;
+import org.apache.jmeter.util.JMeterUtils;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -42,6 +48,7 @@ import io.prometheus.client.Collector;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
+import io.prometheus.client.SimpleCollector;
 import io.prometheus.client.Summary;
 import io.prometheus.client.exporter.MetricsServlet;
 
@@ -49,7 +56,7 @@ import io.prometheus.client.exporter.MetricsServlet;
  * The main test element listener class of this library. Jmeter updates this
  * class through the SampleListener interface and it in turn updates the
  * CollectorRegistry. This class is also a TestStateListener to control when it
- * starts up or shuts down the server that ultimately serves Prometheus the
+ * s up or shuts down the server that ultimately serves Prometheus the
  * results through an http api.
  * 
  * 
@@ -80,6 +87,14 @@ public class PrometheusListener extends AbstractListenerElement
 	private transient Collector assertionsCollector;
 	private CollectorConfig assertionConfig = new CollectorConfig();
 	private boolean collectAssertions = true;
+	
+	private Map<List<String>, Long> latencyCache = new ConcurrentHashMap<>();
+	private Map<List<String>, Long> assertionCache = new ConcurrentHashMap<>();
+	
+	public static final String PROMETHEUS_CLEAN_FREQUENCY = "prometheus.clean.freq";
+	public static final long PROMETHEUS_CLEAN_FREQUENCY_DEFAULT = 0l;				//one hour in ms
+	
+	private CacheCleaner cacheCleaner;
 
 	/**
 	 * Default Constructor.
@@ -97,6 +112,13 @@ public class PrometheusListener extends AbstractListenerElement
 	public PrometheusListener(PrometheusSaveConfig config) {
 		super();
 		this.setSaveConfig(config);
+		
+		long scheduledTime = JMeterUtils.getPropDefault(PROMETHEUS_CLEAN_FREQUENCY, PROMETHEUS_CLEAN_FREQUENCY_DEFAULT);
+		if (scheduledTime > 0) {
+			this.cacheCleaner = new CacheCleaner(this, scheduledTime);
+			log.debug("Configured cache cleaner to run for {} seconds.", scheduledTime);
+		}
+		
 		log.debug("Creating new prometheus listener.");
 	}
 
@@ -113,8 +135,11 @@ public class PrometheusListener extends AbstractListenerElement
 			// build the label values from the event and observe the sampler
 			// metrics
 			String[] samplerLabelValues = this.labelValues(event);
-			if (collectSamples)
+			if (collectSamples) {
 				samplerCollector.labels(samplerLabelValues).observe(event.getResult().getTime());
+				this.updateLatencyCache(samplerLabelValues);
+			}
+				
 
 			if (collectThreads)
 				threadCollector.set(JMeterContextService.getContext().getThreadGroup().getNumberOfThreads());
@@ -129,6 +154,8 @@ public class PrometheusListener extends AbstractListenerElement
 							((Summary) assertionsCollector).labels(assertionsLabelValues).observe(event.getResult().getTime());
 						else if (assertionsCollector instanceof Counter)
 							((Counter) assertionsCollector).labels(assertionsLabelValues).inc();
+						
+						this.updateAssertionCache(assertionsLabelValues);
 					}
 				}
 			}
@@ -142,7 +169,7 @@ public class PrometheusListener extends AbstractListenerElement
 	 * (non-Javadoc)
 	 * 
 	 * @see
-	 * org.apache.jmeter.samplers.SampleListener#sampleStarted(org.apache.jmeter
+	 * org.apache.jmeter.samplers.SampleListener#sampleed(org.apache.jmeter
 	 * .samplers.SampleEvent)
 	 */
 	public void sampleStarted(SampleEvent arg0) {
@@ -168,8 +195,9 @@ public class PrometheusListener extends AbstractListenerElement
 	public void testEnded() {
 		try {
 			this.server.stop();
+			this.cacheCleaner.interrupt();
 		} catch (Exception e) {
-			log.error("Couldn't stop http server", e);
+			log.error("Couldn't stop http server or scheduler", e);
 		}
 	}
 
@@ -186,7 +214,7 @@ public class PrometheusListener extends AbstractListenerElement
 	/*
 	 * (non-Javadoc)
 	 * 
-	 * @see org.apache.jmeter.testelement.TestStateListener#testStarted()
+	 * @see org.apache.jmeter.testelement.TestStateListener#tested()
 	 */
 	public void testStarted() {
 		// update the configuration
@@ -199,9 +227,10 @@ public class PrometheusListener extends AbstractListenerElement
 		context.addServlet(new ServletHolder(new MetricsServlet()), "/metrics");
 
 		try {
-			server.start();
+			this.server.start();
+			this.cacheCleaner.start();
 		} catch (Exception e) {
-			log.error("Couldn't start http server", e);
+			log.error("Couldn't  http server or scheduler", e);
 		}
 
 	}
@@ -233,7 +262,7 @@ public class PrometheusListener extends AbstractListenerElement
 	 * (non-Javadoc)
 	 * 
 	 * @see
-	 * org.apache.jmeter.testelement.TestStateListener#testStarted(java.lang.
+	 * org.apache.jmeter.testelement.TestStateListener#tested(java.lang.
 	 * String)
 	 */
 	public void testStarted(String arg0) {
@@ -260,7 +289,7 @@ public class PrometheusListener extends AbstractListenerElement
 		int totalLength = configLabelLength + sampleVarArr.length;
 		
 		String[] values = new String[totalLength];
-		int valuesIndex = -1;	//start at -1 so you can ++ when referencing it
+		int valuesIndex = -1;	// at -1 so you can ++ when referencing it
 
 		for (int i = 0; i < configLabelLength; i++) {
 			Method m = this.samplerConfig.getMethods()[i];
@@ -478,7 +507,7 @@ public class PrometheusListener extends AbstractListenerElement
 		int combinedLength = assertionLabelLength + sampleVariableLength;
 		
 		String[] returnArray = new String[combinedLength];
-		int returnArrayIndex = -1;	//start at -1 so you can ++ when referencing it
+		int returnArrayIndex = -1;	// at -1 so you can ++ when referencing it
 		
 		//add config first
 		String[] configuredLabels = this.assertionConfig.getLabels();
@@ -500,7 +529,7 @@ public class PrometheusListener extends AbstractListenerElement
 		int combinedLength = configLabelLength + sampleVariableLength;
 		
 		String[] returnArray = new String[combinedLength];
-		int returnArrayIndex = -1;	//start at -1 so you can ++ when referencing it
+		int returnArrayIndex = -1;	// at -1 so you can ++ when referencing it
 		
 		//add config first
 		String[] configuredLabels = this.samplerConfig.getLabels();
@@ -514,6 +543,64 @@ public class PrometheusListener extends AbstractListenerElement
 		}
 		
 		return returnArray;
+	}
+	
+	protected void updateLatencyCache(String...labels){
+		this.updateCache(this.latencyCache, labels);
+	}
+	
+	protected void updateAssertionCache(String...labels){
+		this.updateCache(this.latencyCache, labels);
+	}
+	
+	public void cleanCaches() {
+		cleanCache(this.latencyCache, this.samplerCollector);
+		cleanCache(this.assertionCache, (SimpleCollector<?>) this.assertionsCollector);
+	}
+	
+	protected void updateCache(Map<List<String>, Long> cache, String...labels) {
+		cache.put(Arrays.asList(labels), System.currentTimeMillis());
+	}
+	
+	protected void cleanCache(Map<List<String>, Long> cache, SimpleCollector<?> collector) {
+		long lastTime = System.currentTimeMillis() - 
+				JMeterUtils.getPropDefault(PROMETHEUS_CLEAN_FREQUENCY, PROMETHEUS_CLEAN_FREQUENCY_DEFAULT);
+		
+		for (Entry<List<String>, Long> entry : cache.entrySet()) {
+			if(entry.getValue() < lastTime) {
+				collector.remove(entry.getKey().toArray(new String[] {}));
+				cache.remove(entry.getKey());
+				if(log.isDebugEnabled()) {
+					log.debug("cleared cache with key {}", Arrays.toString(entry.getKey().toArray(new String[] {})));
+				}
+			}
+		}
+		
+	}
+	
+	private class CacheCleaner extends Thread {
+		private PrometheusListener listener;
+		private long sleepTime;
+		
+		CacheCleaner(PrometheusListener listener, long sleepTime) {
+			super("prometheus-cache-cleaner");
+			this.listener = listener;
+			this.sleepTime = sleepTime;
+		}
+
+		@Override
+		public void run() {
+			while(true) {
+				try {
+					Thread.sleep(sleepTime);
+				} catch (InterruptedException e) {
+					break;
+				}
+				this.listener.cleanCaches();
+			}
+			
+		}
+		
 	}
 	
 }
