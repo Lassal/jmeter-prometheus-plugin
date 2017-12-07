@@ -150,12 +150,12 @@ public class PrometheusListener extends AbstractListenerElement
 					for (AssertionResult assertionResult : event.getResult().getAssertionResults()) {
 						String[] assertionsLabelValues = this.labelValues(event, assertionResult);
 						
-						if(assertionsCollector instanceof Summary)
+						if(assertionsCollector instanceof Summary) {
 							((Summary) assertionsCollector).labels(assertionsLabelValues).observe(event.getResult().getTime());
-						else if (assertionsCollector instanceof Counter)
+							this.updateAssertionCache(assertionsLabelValues);
+						}else if (assertionsCollector instanceof Counter) {
 							((Counter) assertionsCollector).labels(assertionsLabelValues).inc();
-						
-						this.updateAssertionCache(assertionsLabelValues);
+						}						
 					}
 				}
 			}
