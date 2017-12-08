@@ -36,9 +36,6 @@ import org.apache.jmeter.testelement.TestStateListener;
 import org.apache.jmeter.testelement.property.ObjectProperty;
 import org.apache.jmeter.threads.JMeterContextService;
 import org.apache.jmeter.util.JMeterUtils;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.servlet.ServletContextHandler;
-import org.eclipse.jetty.servlet.ServletHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,7 +47,6 @@ import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
 import io.prometheus.client.SimpleCollector;
 import io.prometheus.client.Summary;
-import io.prometheus.client.exporter.MetricsServlet;
 
 /**
  * The main test element listener class of this library. Jmeter updates this
@@ -72,7 +68,7 @@ public class PrometheusListener extends AbstractListenerElement
 
 	private static final Logger log = LoggerFactory.getLogger(PrometheusListener.class);
 
-	private transient Server server;
+	private transient PrometheusServer server = PrometheusServer.getInstance();
 
 	// Samplers
 	private transient Summary samplerCollector;
@@ -106,7 +102,7 @@ public class PrometheusListener extends AbstractListenerElement
 	/**
 	 * Constructor with a configuration argument.
 	 * 
-	 * @param config
+	 * @param confifg
 	 *            - the configuration to use.
 	 */
 	public PrometheusListener(PrometheusSaveConfig config) {
@@ -129,6 +125,8 @@ public class PrometheusListener extends AbstractListenerElement
 	 * jmeter.samplers.SampleEvent)
 	 */
 	public void sampleOccurred(SampleEvent event) {
+		
+		log.debug("sampleOccured with name {}", event.getResult().getSampleLabel());
 
 		try {
 
@@ -219,12 +217,6 @@ public class PrometheusListener extends AbstractListenerElement
 	public void testStarted() {
 		// update the configuration
 		this.reconfigure();
-		this.server = new Server(this.getSaveConfig().getPort());
-
-		ServletContextHandler context = new ServletContextHandler();
-		context.setContextPath("/");
-		server.setHandler(context);
-		context.addServlet(new ServletHolder(new MetricsServlet()), "/metrics");
 
 		try {
 			this.server.start();
@@ -269,6 +261,7 @@ public class PrometheusListener extends AbstractListenerElement
 		this.testStarted();
 	}
 
+
 	/**
 	 * For a given SampleEvent, get all the label values as determined by the
 	 * configuration. Can return reflection related errors because this invokes
@@ -297,6 +290,8 @@ public class PrometheusListener extends AbstractListenerElement
 		}
 		
 		System.arraycopy(sampleVarArr, 0, values, configLabelLength, sampleVarArr.length);
+		if(log.isDebugEnabled()) 
+			log.debug("generated labelset {}", Arrays.toString(values));
 
 		return values;
 
@@ -361,7 +356,7 @@ public class PrometheusListener extends AbstractListenerElement
 	 * configuration fails due to reflection errors, default configurations are
 	 * applied and new collectors created.
 	 */
-	protected void reconfigure() {
+	protected synchronized void reconfigure() {
 
 		CollectorConfig tmpAssertConfig = new CollectorConfig();
 		CollectorConfig tmpSamplerConfig = new CollectorConfig();

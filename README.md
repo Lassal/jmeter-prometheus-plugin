@@ -33,11 +33,23 @@ mvn clean package
 ```
 This creates 2 jars, a shaded jar that has all the dependencies within it (this is the one you want) and the original jar. Both are in the target directory.  Simply move the jar to your $JMETER_HOME/lib directory as with any JMeter plugin and you're ready to go!
 
+<<<<<<< HEAD
 ## Configure
 
 |Property Name |Description|Default Value|
 |:----------------:|:-------------------------------------------:|:------------------:|
 prometheus.clean.freq|Long running tests have memory issues, so to aleviate that, you can clear things that haven't been updated in a long time. Metrics that haven't been updated after this value in (ms) will be removed or cleared from the Prometheus registry, thus freeing memory. Setting it to 0 means you never clear anything.| 0|
+=======
+## Configuration
+
+Specify these configuration properties in user.properties (or jmeter.properties, but that's considered bad practice) to override the port you bind, the threads the http server uses and more.
+
+| Name                |Default| Description |
+|:-------------------:|:-----:|:-------------------------------------------------:|
+|prometheus.port      | 9207  | The port the Jetty server will bind to |
+|prometheus.thread.min|   4   | The Max number of threads for the Jetty server|
+|prometheus.thread.max|   4   | The Minimum number of threads for the Jetty server|
+>>>>>>> singletons
 
 ## Feedback
 
