@@ -9,6 +9,7 @@ import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.eclipse.jetty.util.thread.ThreadPool;
 
 import io.prometheus.client.exporter.MetricsServlet;
+import io.prometheus.client.hotspot.DefaultExports;
 
 public class PrometheusServer {
 	
@@ -38,6 +39,7 @@ public class PrometheusServer {
 		context.addServlet(new ServletHolder(new MetricsServlet()), "/metrics");
 		
 		this.server.setConnectors(new ServerConnector[]{ connector });
+		DefaultExports.initialize();
 	}
 	
 	public static PrometheusServer getInstance() {

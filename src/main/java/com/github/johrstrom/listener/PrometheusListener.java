@@ -88,7 +88,7 @@ public class PrometheusListener extends AbstractListenerElement
 	private Map<List<String>, Long> assertionCache = new ConcurrentHashMap<>();
 	
 	public static final String PROMETHEUS_CLEAN_FREQUENCY = "prometheus.clean.freq";
-	public static final long PROMETHEUS_CLEAN_FREQUENCY_DEFAULT = 0l;				//one hour in ms
+	public static final long PROMETHEUS_CLEAN_FREQUENCY_DEFAULT = 0l;
 	
 	private CacheCleaner cacheCleaner;
 
@@ -332,7 +332,8 @@ public class PrometheusListener extends AbstractListenerElement
 		
 		System.arraycopy(sampleVarArr, 0, values, assertionLabelLength, sampleVariableLength);
 
-		log.info("assertion values: {}", (Object) values);
+		if(log.isDebugEnabled())
+			log.debug("assertion values: {}", Arrays.toString(values));
 		
 		return values;
 
