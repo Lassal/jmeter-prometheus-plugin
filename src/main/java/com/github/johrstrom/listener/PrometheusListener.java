@@ -378,7 +378,7 @@ public class PrometheusListener extends AbstractListenerElement
 		}
 
 		// remove old collectors and reassign member variables
-		CollectorRegistry.defaultRegistry.clear();
+		//CollectorRegistry.defaultRegistry.clear();
 		this.assertionConfig = tmpAssertConfig;
 		this.samplerConfig = tmpSamplerConfig;
 
@@ -386,11 +386,10 @@ public class PrometheusListener extends AbstractListenerElement
 		this.createSamplerCollector();
 		this.createAssertionCollector();
 
-		if (collectThreads)
+		if (collectThreads && this.threadCollector == null) {
 			this.threadCollector = Gauge.build().name("jmeter_running_threads").help("Counter for running threds")
 					.create().register(CollectorRegistry.defaultRegistry);
-
-		
+		}
 
 		log.info("Reconfigure complete.");
 
@@ -464,6 +463,11 @@ public class PrometheusListener extends AbstractListenerElement
 			labelNames = this.assertionConfig.getLabels();
 		}
 		
+		if(this.assertionsCollector != null) {
+			CollectorRegistry.defaultRegistry.unregister(this.assertionsCollector);
+		}
+			
+		
 		if(this.getSaveConfig().getAssertionClass().equals(Summary.class))
 			this.assertionsCollector = Summary.build().name("jmeter_assertions_total").help("Counter for assertions")
 				.labelNames(labelNames).quantile(0.5, 0.1).quantile(0.99, 0.1)
@@ -485,6 +489,9 @@ public class PrometheusListener extends AbstractListenerElement
 			}else {
 				labelNames = this.samplerConfig.getLabels();
 			}
+			
+			if(this.samplerCollector != null)
+				CollectorRegistry.defaultRegistry.unregister(this.samplerCollector);
 			
 			this.samplerCollector = Summary.build()
 					.name("jmeter_samples_latency")
