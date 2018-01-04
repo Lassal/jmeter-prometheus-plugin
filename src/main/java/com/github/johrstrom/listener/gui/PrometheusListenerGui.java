@@ -19,26 +19,15 @@
 package com.github.johrstrom.listener.gui;
 
 import java.awt.BorderLayout;
-import javax.swing.BorderFactory;
-import javax.swing.JCheckBox;
-import javax.swing.JComboBox;
-import javax.swing.JLabel;
-import javax.swing.JPanel;
-import javax.swing.JTextField;
 
-import org.apache.jmeter.gui.util.HorizontalPanel;
+import javax.swing.JPanel;
+
 import org.apache.jmeter.gui.util.VerticalPanel;
 import org.apache.jmeter.testelement.TestElement;
 import org.apache.jmeter.visualizers.gui.AbstractListenerGui;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.github.johrstrom.listener.PrometheusListener;
-import com.github.johrstrom.listener.PrometheusSaveConfig;
 
-import io.prometheus.client.Collector;
-import io.prometheus.client.Counter;
-import io.prometheus.client.Summary;
 
 /**
  * The GUI class for the Prometheus Listener.
@@ -53,23 +42,7 @@ public class PrometheusListenerGui extends AbstractListenerGui {
 
 	private static final long serialVersionUID = 4984653136457108054L;
 	public static final String SAVE_CONFIG = "johrstrom.prometheus.save_config";
-	private static final Logger log = LoggerFactory.getLogger(PrometheusListenerGui.class);
-	
-	private static final String[] availableAssertionClasses = new String[] {
-			Counter.class.getSimpleName(),
-			Summary.class.getSimpleName()
-	};
-	
-	//Server related configs
-	private JTextField portTextField;
-	
-	//Assertion related configs
-	private JComboBox<String> assertionComboBox;
-	
-	//Label configs
-	private JCheckBox codeCheckBox;
-	private JCheckBox labelsCheckBox;
-	private JCheckBox successCheckBox;
+
 
 	/**
 	 * Default constructor
@@ -122,34 +95,8 @@ public class PrometheusListenerGui extends AbstractListenerGui {
 	 */
 	public void modifyTestElement(TestElement element) {
 		super.configureTestElement(element);
+	}
 
-		if (element instanceof PrometheusListener) {
-			PrometheusListener listener = (PrometheusListener) element;
-			
-			PrometheusSaveConfig config = new PrometheusSaveConfig();
-			this.setServerConfigs(config);
-			
-
-			this.modifyTestElementForAssertionClass(config);
-			this.modifyTestElementForLabels(config);
-			
-			listener.setSaveConfig(config);
-		}
-	}
-	
-	private void modifyTestElementForAssertionClass(PrometheusSaveConfig config){
-		int selectedIndex = this.assertionComboBox.getSelectedIndex();
-		if(selectedIndex == 0)
-			config.setAssertionClass(Counter.class);
-		else if(selectedIndex == 1)
-			config.setAssertionClass(Summary.class);
-	}
-	
-	private void modifyTestElementForLabels(PrometheusSaveConfig config){
-		config.setSaveCode(this.codeCheckBox.isSelected());
-		config.setSaveLabel(this.labelsCheckBox.isSelected());
-		config.setSaveSuccess(this.successCheckBox.isSelected());
-	}
 
 	/*
 	 * (non-Javadoc)
@@ -175,32 +122,9 @@ public class PrometheusListenerGui extends AbstractListenerGui {
 	@Override
 	public void configure(TestElement element) {
 		super.configure(element);
-		if (element instanceof PrometheusListener) {
-			PrometheusSaveConfig config = ((PrometheusListener) element).getSaveConfig();
-			
-			this.portTextField.setText(Integer.toString(config.getPort()));
-			
-			this.configureAssertionClass(config);
-			this.configureLabels(config);
-		}
+
 	}
-	
-	private void configureAssertionClass(PrometheusSaveConfig config){
-		Class<? extends Collector> assertionClass = config.getAssertionClass();
-		String name = "";
-		if(assertionClass.equals(Summary.class))
-			name = Summary.class.getSimpleName();
-		else if(assertionClass.equals(Counter.class))
-			name = Counter.class.getSimpleName();
-			
-		this.assertionComboBox.setSelectedItem(name);
-	}
-	
-	private void configureLabels(PrometheusSaveConfig config){
-		this.codeCheckBox.setSelected(config.saveCode());
-		this.successCheckBox.setSelected(config.saveSuccess());
-		this.labelsCheckBox.setSelected(config.saveLabel());
-	}
+
 
 	/**
 	 * Private helper function to initialize all the Swing components.
@@ -214,7 +138,7 @@ public class PrometheusListenerGui extends AbstractListenerGui {
 		mainPanel.add(makeTitlePanel(), BorderLayout.NORTH);
 
 		add(mainPanel, BorderLayout.NORTH);
-		add(createTopMostPanel(), BorderLayout.CENTER);
+		//add(createTopMostPanel(), BorderLayout.CENTER);
 	}
 	
 	
@@ -226,104 +150,8 @@ public class PrometheusListenerGui extends AbstractListenerGui {
 	protected JPanel createTopMostPanel(){
 		VerticalPanel panel = new VerticalPanel();
 		
-		panel.add(this.createServerPanel());
-		panel.add(this.createLabelsPanel());
-		panel.add(this.createAssertionsPanel());
-		
 		return panel;
 	}
-	
-	protected JPanel createLabelsPanel() {
-		HorizontalPanel panel = new HorizontalPanel();
-		panel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(),"Labels"));
-		
-		this.codeCheckBox = new JCheckBox("Code");
-		panel.add(this.codeCheckBox);
-		
-		this.labelsCheckBox = new JCheckBox("Jmeter Labels");
-		panel.add(this.labelsCheckBox);
-		
-		this.successCheckBox = new JCheckBox("Success");
-		panel.add(this.successCheckBox);
-		
-		return panel;
-	}
-
-	/**
-	 * Create the panel that holds all the server configuration (ports, config files etc.) 
-	 * 
-	 * @return - the server configuration panel
-	 */
-	protected JPanel createServerPanel(){
-		HorizontalPanel panel = new HorizontalPanel();
-		panel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(),"Server"));
-		
-		panel.add(this.createPortPanel());
-		
-		return panel;
-	}
-	
-	
-	/**
-	 * Create the panel that holds the {@link #portTextField} for configuring the servers port.
-	 * 
-	 * @return
-	 */
-	protected JPanel createPortPanel(){
-		JPanel panel = new JPanel(new BorderLayout(5, 0));
-		JLabel label = new JLabel("Port:");
-        
-		panel.add(label, BorderLayout.WEST);
-        this.portTextField = new JTextField();
-        panel.add(portTextField, BorderLayout.CENTER);
-        
-        panel.setSize(20, panel.getHeight());
-        return panel;
-	}
-	
-	
-	/**
-	 * Set the input save configuration such that it reflects what's in the GUI.
-	 * I.e., what's stored in checkboxes and text fields.
-	 * 
-	 * @param config - the save config to modify
-	 */
-	protected void setServerConfigs(PrometheusSaveConfig config){
-		int port = config.getPort();
-		try {
-			port = Integer.parseInt(this.portTextField.getText());
-		} catch (NumberFormatException e){
-			log.error("Caught {} while trying to parse {} to string. Using {} port.", 
-					e.getClass(), this.portTextField.getText(), port);
-		}
-		
-		config.setPort(port);
-	}
-	
-	
-	protected JPanel createAssertionsPanel(){
-		VerticalPanel panel = new VerticalPanel();
-		panel.setBorder(BorderFactory.createTitledBorder(BorderFactory.createEtchedBorder(),"Assertions"));
-		
-		panel.add(createAssertionClassDropDown());
-		
-		return panel;
-		
-	}
-	
-	
-	protected JPanel createAssertionClassDropDown(){
-		JPanel panel = new JPanel(new BorderLayout(5, 0));
-		JLabel label = new JLabel("Assertion Type:");
-		
-		this.assertionComboBox = new JComboBox<>(availableAssertionClasses);
-		
-		panel.add(label, BorderLayout.WEST);
-		panel.add(this.assertionComboBox, BorderLayout.CENTER);
-		
-		return panel;
-	}
-	
 	
 
 }

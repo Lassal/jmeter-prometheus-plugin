@@ -39,8 +39,6 @@ import org.apache.jmeter.util.JMeterUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.github.johrstrom.util.CollectorConfig;
-
 import io.prometheus.client.Collector;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Counter;
@@ -72,7 +70,6 @@ public class PrometheusListener extends AbstractListenerElement
 
 	// Samplers
 	private transient Summary samplerCollector;
-	private CollectorConfig samplerConfig = new CollectorConfig();
 	private boolean collectSamples = true;
 
 	// Thread counter
@@ -81,7 +78,6 @@ public class PrometheusListener extends AbstractListenerElement
 
 	// Assertions
 	private transient Collector assertionsCollector;
-	private CollectorConfig assertionConfig = new CollectorConfig();
 	private boolean collectAssertions = true;
 	
 	private Map<List<String>, Long> latencyCache = new ConcurrentHashMap<>();
@@ -96,7 +92,7 @@ public class PrometheusListener extends AbstractListenerElement
 	 * Default Constructor.
 	 */
 	public PrometheusListener() {
-		this(new PrometheusSaveConfig());
+		this(new PrometheusListenerConfig());
 	}
 
 	/**
@@ -105,7 +101,7 @@ public class PrometheusListener extends AbstractListenerElement
 	 * @param confifg
 	 *            - the configuration to use.
 	 */
-	public PrometheusListener(PrometheusSaveConfig config) {
+	public PrometheusListener(PrometheusListenerConfig config) {
 		super();
 		this.setSaveConfig(config);
 		
@@ -227,28 +223,6 @@ public class PrometheusListener extends AbstractListenerElement
 
 	}
 
-	/**
-	 * Set a new Save configuration. Note that this function reconfigures this
-	 * object and one should not set the save config directly through
-	 * {@link #setProperty(org.apache.jmeter.testelement.property.JMeterProperty)}
-	 * functions.
-	 * 
-	 * @param config
-	 *            - the configuration object
-	 */
-	public void setSaveConfig(PrometheusSaveConfig config) {
-		this.setProperty(new ObjectProperty(SAVE_CONFIG, config));
-		this.reconfigure();
-	}
-
-	/**
-	 * Get the current Save configuration
-	 * 
-	 * @return
-	 */
-	public PrometheusSaveConfig getSaveConfig() {
-		return (PrometheusSaveConfig) this.getProperty(SAVE_CONFIG).getObjectValue();
-	}
 
 	/*
 	 * (non-Javadoc)
