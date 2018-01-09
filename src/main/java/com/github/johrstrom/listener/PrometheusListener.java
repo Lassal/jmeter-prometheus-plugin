@@ -22,10 +22,6 @@ import java.io.Serializable;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.jmeter.assertions.AssertionResult;
 import org.apache.jmeter.engine.util.NoThreadClone;
@@ -33,18 +29,9 @@ import org.apache.jmeter.reporters.AbstractListenerElement;
 import org.apache.jmeter.samplers.SampleEvent;
 import org.apache.jmeter.samplers.SampleListener;
 import org.apache.jmeter.testelement.TestStateListener;
-import org.apache.jmeter.testelement.property.ObjectProperty;
-import org.apache.jmeter.threads.JMeterContextService;
-import org.apache.jmeter.util.JMeterUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.prometheus.client.Collector;
-import io.prometheus.client.CollectorRegistry;
-import io.prometheus.client.Counter;
-import io.prometheus.client.Gauge;
-import io.prometheus.client.SimpleCollector;
-import io.prometheus.client.Summary;
 
 /**
  * The main test element listener class of this library. Jmeter updates this
@@ -60,59 +47,23 @@ import io.prometheus.client.Summary;
 public class PrometheusListener extends AbstractListenerElement
 		implements SampleListener, Serializable, TestStateListener, NoThreadClone {
 
-	public static final String SAVE_CONFIG = "johrstrom.save_config";
-
 	private static final long serialVersionUID = -4833646252357876746L;
 
 	private static final Logger log = LoggerFactory.getLogger(PrometheusListener.class);
 
 	private transient PrometheusServer server = PrometheusServer.getInstance();
+	private PrometheusListenerConfig config = new PrometheusListenerConfig();
 
-	// Samplers
-	private transient Summary samplerCollector;
-	private boolean collectSamples = true;
-
-	// Thread counter
-	private transient Gauge threadCollector;
-	private boolean collectThreads = true;
-
-	// Assertions
-	private transient Collector assertionsCollector;
-	private boolean collectAssertions = true;
+	private PrometheusMetricUpdater updater =  PrometheusMetricUpdater.getInstance();
 	
-	private Map<List<String>, Long> latencyCache = new ConcurrentHashMap<>();
-	private Map<List<String>, Long> assertionCache = new ConcurrentHashMap<>();
-	
-	public static final String PROMETHEUS_CLEAN_FREQUENCY = "prometheus.clean.freq";
-	public static final long PROMETHEUS_CLEAN_FREQUENCY_DEFAULT = 0l;
-	
-	private CacheCleaner cacheCleaner;
 
 	/**
 	 * Default Constructor.
 	 */
 	public PrometheusListener() {
-		this(new PrometheusListenerConfig());
+		super();
 	}
 
-	/**
-	 * Constructor with a configuration argument.
-	 * 
-	 * @param confifg
-	 *            - the configuration to use.
-	 */
-	public PrometheusListener(PrometheusListenerConfig config) {
-		super();
-		this.setSaveConfig(config);
-		
-		long scheduledTime = JMeterUtils.getPropDefault(PROMETHEUS_CLEAN_FREQUENCY, PROMETHEUS_CLEAN_FREQUENCY_DEFAULT);
-		if (scheduledTime > 0) {
-			this.cacheCleaner = new CacheCleaner(this, scheduledTime);
-			log.debug("Configured cache cleaner to run for {} seconds.", scheduledTime);
-		}
-		
-		log.debug("Creating new prometheus listener.");
-	}
 
 	/*
 	 * (non-Javadoc)
@@ -129,33 +80,24 @@ public class PrometheusListener extends AbstractListenerElement
 			// build the label values from the event and observe the sampler
 			// metrics
 			String[] samplerLabelValues = this.labelValues(event);
-			if (collectSamples) {
-				samplerCollector.labels(samplerLabelValues).observe(event.getResult().getTime());
-				this.updateLatencyCache(samplerLabelValues);
-			}
-				
+			this.updater.updateSamplerMetric(event.getResult().getTime(), samplerLabelValues);
+			this.updater.updateThreadMetric();
 
-			if (collectThreads)
-				threadCollector.set(JMeterContextService.getContext().getThreadGroup().getNumberOfThreads());
 
 			// if there are any assertions to
-			if (collectAssertions) {
+			if (PrometheusListenerConfig.saveAssertions()) {
 				if (event.getResult().getAssertionResults().length > 0) {
 					for (AssertionResult assertionResult : event.getResult().getAssertionResults()) {
 						String[] assertionsLabelValues = this.labelValues(event, assertionResult);
 						
-						if(assertionsCollector instanceof Summary) {
-							((Summary) assertionsCollector).labels(assertionsLabelValues).observe(event.getResult().getTime());
-							this.updateAssertionCache(assertionsLabelValues);
-						}else if (assertionsCollector instanceof Counter) {
-							((Counter) assertionsCollector).labels(assertionsLabelValues).inc();
-						}						
+						this.updater.updateAssertionMetric(event.getResult().getTime(), assertionsLabelValues);						
 					}
 				}
 			}
 
 		} catch (Exception e) {
 			log.error("Didn't update metric because of exception. Message was: {}", e.getMessage());
+			log.debug("Didn't update metric because of exception", e);
 		}
 	}
 
@@ -189,7 +131,6 @@ public class PrometheusListener extends AbstractListenerElement
 	public void testEnded() {
 		try {
 			this.server.stop();
-			this.cacheCleaner.interrupt();
 		} catch (Exception e) {
 			log.error("Couldn't stop http server or scheduler", e);
 		}
@@ -211,12 +152,9 @@ public class PrometheusListener extends AbstractListenerElement
 	 * @see org.apache.jmeter.testelement.TestStateListener#tested()
 	 */
 	public void testStarted() {
-		// update the configuration
-		this.reconfigure();
 
 		try {
 			this.server.start();
-			this.cacheCleaner.start();
 		} catch (Exception e) {
 			log.error("Couldn't  http server or scheduler", e);
 		}
@@ -252,14 +190,14 @@ public class PrometheusListener extends AbstractListenerElement
 			throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
 		
 		String[] sampleVarArr = this.sampleVariableValues(event);
-		int configLabelLength = this.samplerConfig.getLabels().length;
+		int configLabelLength = config.getSamplerLabels().length;
 		int totalLength = configLabelLength + sampleVarArr.length;
 		
 		String[] values = new String[totalLength];
 		int valuesIndex = -1;	// at -1 so you can ++ when referencing it
 
 		for (int i = 0; i < configLabelLength; i++) {
-			Method m = this.samplerConfig.getMethods()[i];
+			Method m = this.config.getSamplerMethods()[i];
 			values[++valuesIndex] = m.invoke(event.getResult()).toString();
 		}
 		
@@ -290,14 +228,14 @@ public class PrometheusListener extends AbstractListenerElement
 			throws IllegalAccessException, IllegalArgumentException, InvocationTargetException {
 
 		String[] sampleVarArr = this.sampleVariableValues(event);
-		int assertionLabelLength = this.assertionConfig.getLabels().length;
+		int assertionLabelLength = config.getAssertionLabels().length;
 		int sampleVariableLength = sampleVarArr.length;
 		int combinedLength = assertionLabelLength + sampleVariableLength;
 		
 		String[] values = new String[combinedLength];
 
 		for (int i = 0; i < assertionLabelLength; i++) {
-			Method m = this.assertionConfig.getMethods()[i];
+			Method m = this.config.getAssertionMethods()[i];
 			if (m.getDeclaringClass().equals(AssertionResult.class))
 				values[i] = m.invoke(assertionResult).toString();
 			else
@@ -324,260 +262,16 @@ public class PrometheusListener extends AbstractListenerElement
 		
 		return values;
 	}
-
-	/**
-	 * Helper function to modify private member collectors and collector
-	 * configurations. Any invocation of this method will modify them, even if
-	 * configuration fails due to reflection errors, default configurations are
-	 * applied and new collectors created.
-	 */
-	protected synchronized void reconfigure() {
-
-		CollectorConfig tmpAssertConfig = new CollectorConfig();
-		CollectorConfig tmpSamplerConfig = new CollectorConfig();
-
-		// activate collections
-		collectSamples = this.getSaveConfig().saveSuccess() || this.getSaveConfig().saveCode()
-				|| this.getSaveConfig().saveLabel();
-		collectThreads = this.getSaveConfig().saveThreads();
-		collectAssertions = this.getSaveConfig().saveAssertions();
-
-		try {
-			// try to build new config objects
-			tmpAssertConfig = this.newAssertionCollectorConfig();
-			tmpSamplerConfig = this.newSamplerCollectorConfig();
-
-		} catch (NoSuchMethodException | SecurityException e) {
-			log.error("Only partial reconfigure due to exception.", e);
-		}
-
-		// remove old collectors and reassign member variables
-		//CollectorRegistry.defaultRegistry.clear();
-		this.assertionConfig = tmpAssertConfig;
-		this.samplerConfig = tmpSamplerConfig;
-
-		// register new collectors
-		this.createSamplerCollector();
-		this.createAssertionCollector();
-
-		if (collectThreads && this.threadCollector == null) {
-			this.threadCollector = Gauge.build().name("jmeter_running_threads").help("Counter for running threds")
-					.create().register(CollectorRegistry.defaultRegistry);
-		}
-
-		log.info("Reconfigure complete.");
-
-		if (log.isDebugEnabled()) {
-			log.debug("Assertion Configuration: " + this.assertionConfig.toString());
-			log.debug("Sampler Configuration: " + this.samplerConfig.toString());
-		}
-
-	}
-
-	/**
-	 * Create a new CollectorConfig for Samplers. Due to reflection this throws
-	 * errors based on security and absence of method definitions.
-	 * 
-	 * @return the new CollectorConfig
-	 * @throws SecurityException
-	 * @throws NoSuchMethodException
-	 */
-	protected CollectorConfig newSamplerCollectorConfig() throws NoSuchMethodException, SecurityException {
-		PrometheusSaveConfig saveConfig = this.getSaveConfig();
-		CollectorConfig collectorConfig = new CollectorConfig();
-
-		if (saveConfig.saveLabel()) {
-			collectorConfig.saveSamplerLabel();
-		}
-
-		if (saveConfig.saveCode()) {
-			collectorConfig.saveSamlerCode();
-		}
-
-		if (saveConfig.saveSuccess()) {
-			collectorConfig.saveSamplerSuccess();
-		}
-
-		return collectorConfig;
-	}
-
-	/**
-	 * Create a new CollectorConfig for Assertions. Due to reflection this
-	 * throws errors based on security and absence of method definitions.
-	 * 
-	 * @return
-	 * @throws NoSuchMethodException
-	 * @throws SecurityException
-	 */
-	protected CollectorConfig newAssertionCollectorConfig() throws NoSuchMethodException, SecurityException {
-		PrometheusSaveConfig saveConfig = this.getSaveConfig();
-		CollectorConfig collectorConfig = new CollectorConfig();
-
-		if (saveConfig.saveAssertions()) {
-			// TODO configure assertions more granularly
-			collectorConfig.saveSamplerLabel();
-			collectorConfig.saveAssertionFailure();
-			collectorConfig.saveAssertionName();
-		}
-
-		return collectorConfig;
-	}
 	
 	
-	protected void createAssertionCollector(){
-		if (!collectAssertions){
-			return;
-		}
-		
-		String[] labelNames = new String[]{};
-		
-		if (SampleEvent.getVarCount() > 0) {
-			labelNames = this.combineAssertionLabelsWithSampleVars();
-		}else {
-			labelNames = this.assertionConfig.getLabels();
-		}
-		
-		if(this.assertionsCollector != null) {
-			CollectorRegistry.defaultRegistry.unregister(this.assertionsCollector);
-		}
-			
-		
-		if(this.getSaveConfig().getAssertionClass().equals(Summary.class))
-			this.assertionsCollector = Summary.build().name("jmeter_assertions_total").help("Counter for assertions")
-				.labelNames(labelNames).quantile(0.5, 0.1).quantile(0.99, 0.1)
-				.create().register(CollectorRegistry.defaultRegistry);
-		
-		else if(this.getSaveConfig().getAssertionClass().equals(Counter.class))
-			this.assertionsCollector = Counter.build().name("jmeter_assertions_total").help("Counter for assertions")
-			.labelNames(labelNames).create().register(CollectorRegistry.defaultRegistry);
-			
-	}
 
 	
-	protected void createSamplerCollector(){
-		if (collectSamples) {
-			String[] labelNames = new String[]{};
-			
-			if (SampleEvent.getVarCount() > 0) {
-				labelNames = this.combineConfigLabelsWithSampleVars();
-			}else {
-				labelNames = this.samplerConfig.getLabels();
-			}
-			
-			if(this.samplerCollector != null)
-				CollectorRegistry.defaultRegistry.unregister(this.samplerCollector);
-			
-			this.samplerCollector = Summary.build()
-					.name("jmeter_samples_latency")
-					.help("Summary for Sample Latency")
-					.labelNames(labelNames)
-					.quantile(0.5, 0.1)
-					.quantile(0.99, 0.1)
-					.create()
-					.register(CollectorRegistry.defaultRegistry);
-		}
-	}
-	
-	private String[] combineAssertionLabelsWithSampleVars() {
-		int assertionLabelLength = this.assertionConfig.getLabels().length;
-		int sampleVariableLength = SampleEvent.getVarCount();
-		int combinedLength = assertionLabelLength + sampleVariableLength;
-		
-		String[] returnArray = new String[combinedLength];
-		int returnArrayIndex = -1;	// at -1 so you can ++ when referencing it
-		
-		//add config first
-		String[] configuredLabels = this.assertionConfig.getLabels();
-		for (int i = 0; i < assertionLabelLength; i++) {
-			returnArray[++returnArrayIndex] = configuredLabels[i];
-		}
-		
-		//now add sample variables
-		for (int i = 0; i < sampleVariableLength; i++) {
-			returnArray[++returnArrayIndex] = SampleEvent.getVarName(i);
-		}
-		
-		return returnArray;
-	}
-	
-	private String[] combineConfigLabelsWithSampleVars() {
-		int configLabelLength = this.samplerConfig.getLabels().length;
-		int sampleVariableLength = SampleEvent.getVarCount();
-		int combinedLength = configLabelLength + sampleVariableLength;
-		
-		String[] returnArray = new String[combinedLength];
-		int returnArrayIndex = -1;	// at -1 so you can ++ when referencing it
-		
-		//add config first
-		String[] configuredLabels = this.samplerConfig.getLabels();
-		for (int i = 0; i < configLabelLength; i++) {
-			returnArray[++returnArrayIndex] = configuredLabels[i];
-		}
-		
-		//now add sample variables
-		for (int i = 0; i < sampleVariableLength; i++) {
-			returnArray[++returnArrayIndex] = SampleEvent.getVarName(i);
-		}
-		
-		return returnArray;
-	}
-	
-	protected void updateLatencyCache(String...labels){
-		this.updateCache(this.latencyCache, labels);
-	}
-	
-	protected void updateAssertionCache(String...labels){
-		this.updateCache(this.latencyCache, labels);
-	}
-	
-	public void cleanCaches() {
-		cleanCache(this.latencyCache, this.samplerCollector);
-		cleanCache(this.assertionCache, (SimpleCollector<?>) this.assertionsCollector);
-	}
-	
-	protected void updateCache(Map<List<String>, Long> cache, String...labels) {
-		cache.put(Arrays.asList(labels), System.currentTimeMillis());
-	}
-	
-	protected void cleanCache(Map<List<String>, Long> cache, SimpleCollector<?> collector) {
-		long lastTime = System.currentTimeMillis() - 
-				JMeterUtils.getPropDefault(PROMETHEUS_CLEAN_FREQUENCY, PROMETHEUS_CLEAN_FREQUENCY_DEFAULT);
-		
-		for (Entry<List<String>, Long> entry : cache.entrySet()) {
-			if(entry.getValue() < lastTime) {
-				collector.remove(entry.getKey().toArray(new String[] {}));
-				cache.remove(entry.getKey());
-				if(log.isDebugEnabled()) {
-					log.debug("cleared cache with key {}", Arrays.toString(entry.getKey().toArray(new String[] {})));
-				}
-			}
-		}
-		
-	}
-	
-	private class CacheCleaner extends Thread {
-		private PrometheusListener listener;
-		private long sleepTime;
-		
-		CacheCleaner(PrometheusListener listener, long sleepTime) {
-			super("prometheus-cache-cleaner");
-			this.listener = listener;
-			this.sleepTime = sleepTime;
-		}
 
-		@Override
-		public void run() {
-			while(true) {
-				try {
-					Thread.sleep(sleepTime);
-				} catch (InterruptedException e) {
-					break;
-				}
-				this.listener.cleanCaches();
-			}
-			
-		}
-		
-	}
+	
+
+	
+
+	
+
 	
 }

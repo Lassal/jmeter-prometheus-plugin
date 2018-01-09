@@ -1,6 +1,7 @@
 target/
 .settings/*
 .classpath
+.project
 bin/
 package_and_mv.sh
 dependency-reduced-pom.xml

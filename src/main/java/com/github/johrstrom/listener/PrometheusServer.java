@@ -40,6 +40,7 @@ public class PrometheusServer {
 		
 		this.server.setConnectors(new ServerConnector[]{ connector });
 		DefaultExports.initialize();
+		
 	}
 	
 	public static PrometheusServer getInstance() {
@@ -65,5 +66,6 @@ public class PrometheusServer {
 	public void stop() throws Exception {
 		this.server.stop();
 	}
+	
 
 }
