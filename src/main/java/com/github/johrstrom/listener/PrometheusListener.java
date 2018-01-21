@@ -52,9 +52,9 @@ public class PrometheusListener extends AbstractListenerElement
 	private static final Logger log = LoggerFactory.getLogger(PrometheusListener.class);
 
 	private transient PrometheusServer server = PrometheusServer.getInstance();
-	private PrometheusListenerConfig config = new PrometheusListenerConfig();
+	private transient PrometheusListenerConfig config = new PrometheusListenerConfig();
 
-	private PrometheusMetricUpdater updater =  PrometheusMetricUpdater.getInstance();
+	private transient PrometheusMetricUpdater updater =  PrometheusMetricUpdater.getInstance();
 	
 
 	/**
@@ -152,11 +152,10 @@ public class PrometheusListener extends AbstractListenerElement
 	 * @see org.apache.jmeter.testelement.TestStateListener#tested()
 	 */
 	public void testStarted() {
-
 		try {
 			this.server.start();
 		} catch (Exception e) {
-			log.error("Couldn't  http server or scheduler", e);
+			log.error("Couldn't start http server or scheduler", e);
 		}
 
 	}

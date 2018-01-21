@@ -14,7 +14,7 @@ import io.prometheus.client.hotspot.DefaultExports;
 public class PrometheusServer {
 	
 	public static final String PROMETHEUS_PORT = "prometheus.port";
-	public static final int PROMETHEUS_PORT_DEFAULT = 9207;
+	public static final int PROMETHEUS_PORT_DEFAULT = 9270;
 	
 	public static final String PROMETHEUS_THREAD_MIN = "prometheus.thread.max";
 	public static final int PROMETHEUS_THREAD_MIN_DEFAULT = 4;
@@ -43,7 +43,7 @@ public class PrometheusServer {
 		
 	}
 	
-	public static PrometheusServer getInstance() {
+	public static synchronized PrometheusServer getInstance() {
 		if (instance == null) {
 			instance = new PrometheusServer();
 		}
@@ -59,11 +59,11 @@ public class PrometheusServer {
         return threadPool;
 	}
 	
-	public void start() throws Exception {
+	public synchronized void start() throws Exception {
 		this.server.start();
 	}
 	
-	public void stop() throws Exception {
+	public synchronized void stop() throws Exception {
 		this.server.stop();
 	}
 	
