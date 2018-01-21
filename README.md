@@ -41,11 +41,16 @@ Specify these configuration properties in user.properties (or jmeter.properties,
 
 |Property Name |Description|Default Value|
 |:----------------:|:-------------------------------------------:|:------------------:|
-prometheus.clean.freq|Long running tests have memory issues, so to aleviate that, you can clear things that haven't been updated in a long time. Metrics that haven't been updated after this value in (ms) will be removed or cleared from the Prometheus registry, thus freeing memory. Setting it to 0 means you never clear anything.| 0|
-|prometheus.port      | The port the Jetty server will bind to | 9207 |
+|prometheus.save.label| Enable or disable keeping the 'label' label (The name of a given Sampler|true|
+|prometheus.save.code| Enable or disable keeping the status code label|true|
+|prometheus.save.success| Enable or disable keeping the success label|true|
+|prometheus.save.assertions| Enable or disable keeping assertion metrics|true|
+|prometheus.save.threads| Enable or disable keeping the current number of running threads metric|true|
+|prometheus.assertion.class| When keeping assertions, they can be of type 'counter' or 'summary'|counter| 
+|prometheus.clean.freq|Long running tests have memory issues, so to aleviate that, you can clear things that haven't been updated in a long time. Metrics that haven't been updated after this value in (ms) will be removed or cleared from the Prometheus registry, thus freeing memory. Setting it to 0 means you never clear anything.| 0|
+|prometheus.port      | The port the Jetty server will bind to | 9270 |
 |prometheus.thread.min| The Max number of threads for the Jetty server. This will cause errors if it's less than 4. | 4|
 |prometheus.thread.max| The Minimum number of threads for the Jetty server| 4|
-
 
 ## Feedback
 

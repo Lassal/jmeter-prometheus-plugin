@@ -18,6 +18,15 @@ import io.prometheus.client.Gauge;
 import io.prometheus.client.SimpleCollector;
 import io.prometheus.client.Summary;
 
+/**
+ * A facade class for updating Prometheus Metrics. The facade exists so that it may 
+ * keep a cache of when metrics with certain labels where updated and clear them from 
+ * the {@link io.prometheus.client.CollectorRegistry} when they are older than a configurable
+ * TTL (time to live). 
+ * 
+ * @author Jeff Ohrstrom
+ *
+ */
 public class PrometheusMetricUpdater {
 	
 	private static PrometheusMetricUpdater instance = null;
@@ -54,7 +63,7 @@ public class PrometheusMetricUpdater {
 	}
 	
 	@Override
-	protected void finalize() throws Throwable {
+	protected synchronized void finalize() throws Throwable {
 		super.finalize();
 		
 		if(this.cacheCleaner != null) {
@@ -65,7 +74,7 @@ public class PrometheusMetricUpdater {
 		
 	}
 
-	public static PrometheusMetricUpdater getInstance() {
+	public synchronized static PrometheusMetricUpdater getInstance() {
 		if (instance == null) {
 			instance = new PrometheusMetricUpdater();
 		}
